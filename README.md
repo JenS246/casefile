@@ -6,10 +6,12 @@ CASEFILE is a browser-based typing game for paralegal students in a Civil Litiga
 
 - Choose one of four fictional civil matters or let the game select one at random.
 - Each playthrough generates a coherent set of facts before the first document opens.
-- Type each document. Session accuracy, characters typed, and practice time update continuously.
+- Type each document. Session accuracy and active typing time update continuously.
 - On phones and tablets, tap the document text to open the on-screen keyboard.
 - End a practice session at any point and keep a valid session result.
-- Continue a partially typed document later; progress is stored only in that browser.
+- End-of-session results include accuracy, standard five-character WPM, characters typed, and active typing time.
+- Continue a partially typed document later from the next unfinished paragraph; progress is stored only in that browser.
+- Press Tab and then Enter while typing to restart the current session.
 - Complete two or three short File Checks during the matter.
 - Replay the same matter to receive a new but internally consistent fact pattern.
 
