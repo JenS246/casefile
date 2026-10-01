@@ -7,6 +7,7 @@ CASEFILE is a browser-based typing game for paralegal students in a Civil Litiga
 - Choose one of four fictional civil matters or let the game select one at random.
 - Each playthrough generates a coherent set of facts before the first document opens.
 - Type each document. Errors remain visible until corrected.
+- On phones and tablets, tap the document text to open the on-screen keyboard.
 - Complete two or three short File Checks during the matter.
 - Replay the same matter to receive a new but internally consistent fact pattern.
 
@@ -35,4 +36,3 @@ This is a static site and can be hosted on GitHub Pages. The included workflow p
 Once Pages is enabled for GitHub Actions, the public URL is:
 
 `https://jens246.github.io/casefile/`
-

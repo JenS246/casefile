@@ -206,9 +206,9 @@ function renderDocument() {
           <div><p class="matter-name">${state.caseDef.title}</p><h1 class="document-title">${doc.title}</h1></div>
           <span class="accuracy">Accuracy ${accuracy}%</span>
         </header>
-        <div class="typing-wrap" tabindex="0" role="textbox" aria-label="Typing area. Type the displayed document." aria-multiline="true">
+        <div class="typing-wrap">
           <p class="typing-text" aria-hidden="true"></p>
-          <textarea class="capture" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-hidden="true"></textarea>
+          <textarea class="capture" inputmode="text" enterkeyhint="done" rows="1" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Type the displayed document"></textarea>
         </div>
         <footer class="document-footer"><span class="keyboard-note">Type to begin. Backspace to correct.</span><span data-continue-slot></span></footer>
       </article>
@@ -224,6 +224,7 @@ function bindTyping(target) {
   const text = document.querySelector(".typing-text");
   const note = document.querySelector(".keyboard-note");
   const continueSlot = document.querySelector("[data-continue-slot]");
+  const usesTouch = navigator.maxTouchPoints > 0 || matchMedia("(pointer: coarse)").matches;
 
   function draw() {
     text.innerHTML = Array.from(target).map((char, index) => {
@@ -234,6 +235,8 @@ function bindTyping(target) {
     }).join("");
     const accuracy = state.attempts ? Math.round((state.correctAttempts / state.attempts) * 100) : 100;
     document.querySelector(".accuracy").textContent = `Accuracy ${accuracy}%`;
+    capture.value = state.typed;
+    capture.setSelectionRange(capture.value.length, capture.value.length);
     if (state.typed.length === target.length && state.typed === target) {
       note.textContent = "Document complete";
       continueSlot.innerHTML = `<button class="primary-button" data-continue>Continue</button>`;
@@ -243,25 +246,26 @@ function bindTyping(target) {
 
   function focusCapture() { capture.focus({ preventScroll: true }); }
   wrap.addEventListener("click", focusCapture);
-  wrap.addEventListener("focus", focusCapture);
   capture.addEventListener("paste", event => event.preventDefault());
   capture.addEventListener("keydown", event => {
-    if (event.key === "Backspace") {
-      event.preventDefault();
-      state.typed = state.typed.slice(0, -1);
-      draw();
-      return;
+    if (event.key === "Enter") event.preventDefault();
+  });
+  capture.addEventListener("input", () => {
+    const next = Array.from(capture.value.replace(/[\r\n]/g, "")).slice(0, target.length).join("");
+    let commonLength = 0;
+    const compareLength = Math.min(state.typed.length, next.length);
+    while (commonLength < compareLength && state.typed[commonLength] === next[commonLength]) commonLength += 1;
+    for (let index = commonLength; index < next.length; index += 1) {
+      state.attempts += 1;
+      if (next[index] === target[index]) state.correctAttempts += 1;
     }
-    if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey || state.typed.length >= target.length) return;
-    event.preventDefault();
-    const expected = target[state.typed.length];
-    state.attempts += 1;
-    if (event.key === expected) state.correctAttempts += 1;
-    state.typed += event.key;
+    state.typed = next;
     draw();
   });
+  capture.maxLength = target.length;
+  if (usesTouch) note.textContent = "Tap the text to open your keyboard.";
   draw();
-  requestAnimationFrame(focusCapture);
+  if (!usesTouch) requestAnimationFrame(focusCapture);
 }
 
 function advance() {

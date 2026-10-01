@@ -224,7 +224,10 @@ button:focus-visible,
 .typing-wrap {
   position: relative;
   cursor: text;
+  touch-action: manipulation;
 }
+
+.typing-wrap:focus-within { outline: 1px solid transparent; }
 
 .typing-text {
   margin: 0;
@@ -237,6 +240,7 @@ button:focus-visible,
   white-space: pre-wrap;
   overflow-wrap: break-word;
   user-select: none;
+  pointer-events: none;
 }
 
 .char.typed { color: var(--ink); }
@@ -248,10 +252,21 @@ button:focus-visible,
 
 .capture {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
   opacity: 0;
-  pointer-events: none;
+  resize: none;
+  cursor: text;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .document-footer {
