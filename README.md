@@ -6,12 +6,14 @@ CASEFILE is a browser-based typing game for paralegal students in a Civil Litiga
 
 - Choose one of four fictional civil matters or let the game select one at random.
 - Each playthrough generates a coherent set of facts before the first document opens.
-- Type each document. Errors remain visible until corrected.
+- Type each document. Session accuracy, characters typed, and practice time update continuously.
 - On phones and tablets, tap the document text to open the on-screen keyboard.
+- End a practice session at any point and keep a valid session result.
+- Continue a partially typed document later; progress is stored only in that browser.
 - Complete two or three short File Checks during the matter.
 - Replay the same matter to receive a new but internally consistent fact pattern.
 
-The app stores no personal data, uses no backend, and has no third-party runtime dependencies.
+The app stores document progress locally in the browser, uses no backend, and has no third-party runtime dependencies.
 
 ## Run locally
 
@@ -27,7 +29,7 @@ Open `http://localhost:4173`.
 
 - `index.html`: document shell and metadata
 - `styles.css`: responsive visual system with light and dark color schemes
-- `app.js`: case data, fact generation, typing engine, File Checks, and results
+- `app.js`: case data, fact generation, typing engine, local progress, File Checks, and session/document results
 
 ## Deployment
 

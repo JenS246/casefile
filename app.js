@@ -122,14 +122,20 @@ const CASES = [
 ];
 
 const app = document.querySelector("#app");
+const STORAGE_KEY = "casefile-progress-v2";
+let sessionTimer = null;
+let checkpointTimer = null;
 let state = {
   caseDef: null,
   facts: null,
   docIndex: 0,
   typed: "",
-  attempts: 0,
-  correctAttempts: 0,
-  startedAt: 0,
+  docAttempts: 0,
+  docCorrect: 0,
+  sessionAttempts: 0,
+  sessionCorrect: 0,
+  sessionCharacters: 0,
+  sessionStartedAt: 0,
   checkResults: [],
   activeCheck: null,
   checkAnswered: false
@@ -147,24 +153,93 @@ function escapeHtml(value) {
   return value.replace(/[&<>"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
 }
 
-function masthead(extra = "Civil Litigation Practice") {
+function loadProgress() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function progressFor(caseId) {
+  return loadProgress()[caseId] || null;
+}
+
+function saveProgress() {
+  if (!state.caseDef) return;
+  if (state.docIndex === 0 && !state.typed.length && !state.docAttempts && !state.checkResults.length) return;
+  const allProgress = loadProgress();
+  allProgress[state.caseDef.id] = {
+    facts: state.facts,
+    docIndex: state.docIndex,
+    typed: state.typed,
+    docAttempts: state.docAttempts,
+    docCorrect: state.docCorrect,
+    checkResults: state.checkResults,
+    savedAt: Date.now()
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(allProgress));
+}
+
+function clearProgress(caseId) {
+  const allProgress = loadProgress();
+  delete allProgress[caseId];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(allProgress));
+}
+
+function resetSession() {
+  state.sessionAttempts = 0;
+  state.sessionCorrect = 0;
+  state.sessionCharacters = 0;
+  state.sessionStartedAt = 0;
+}
+
+function stopTimers() {
+  clearInterval(sessionTimer);
+  clearTimeout(checkpointTimer);
+  sessionTimer = null;
+  checkpointTimer = null;
+}
+
+function accuracy(correct, attempts) {
+  return attempts ? ((correct / attempts) * 100).toFixed(1) : "100.0";
+}
+
+function elapsedSeconds() {
+  return state.sessionStartedAt ? Math.floor((Date.now() - state.sessionStartedAt) / 1000) : 0;
+}
+
+function formatTime(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function masthead(extra = "Civil litigation typing game") {
   return `<header class="masthead"><button class="wordmark" data-home aria-label="Return to case library">CASEFILE</button><span class="course-label">${extra}</span></header>`;
 }
 
 function renderHome() {
-  state = { ...state, caseDef: null, facts: null, docIndex: 0, typed: "", attempts: 0, correctAttempts: 0, startedAt: 0, checkResults: [], activeCheck: null, checkAnswered: false };
+  stopTimers();
+  state = { ...state, caseDef: null, facts: null, docIndex: 0, typed: "", docAttempts: 0, docCorrect: 0, sessionAttempts: 0, sessionCorrect: 0, sessionCharacters: 0, sessionStartedAt: 0, checkResults: [], activeCheck: null, checkAnswered: false };
   app.innerHTML = `<div class="shell">${masthead()}
     <section class="home">
-      <div class="home-title"><h1>CASE<br>FILE</h1><p>Civil Litigation Practice</p></div>
+      <div class="home-title">
+        <h1 aria-label="CASEFILE"><span class="title-word">CASE</span><span class="key-row" aria-hidden="true"><span>F</span><span>I</span><span>L</span><span>E</span></span></h1>
+        <p>A civil litigation typing game</p>
+      </div>
       <div class="library">
-        <h2>Open a case</h2>
+        <h2>Open a file</h2>
         <div class="case-list">
-          ${CASES.map(caseDef => `<button class="case-row" data-case="${caseDef.id}">
-            <span><span class="case-name">${caseDef.title}</span><span class="case-meta">${caseDef.type} · ${caseDef.documents.length} documents</span></span>
-            <span class="case-arrow" aria-hidden="true">→</span>
-          </button>`).join("")}
+          ${CASES.map(caseDef => {
+            const saved = progressFor(caseDef.id);
+            const progress = saved ? `<span class="saved-progress">Continue at document ${saved.docIndex + 1}</span>` : "";
+            return `<button class="case-row" data-case="${caseDef.id}">
+              <span><span class="case-name">${caseDef.title}</span><span class="case-meta">${caseDef.type} / ${caseDef.documents.length} documents</span>${progress}</span>
+              <span class="case-arrow" aria-hidden="true">Open</span>
+            </button>`;
+          }).join("")}
         </div>
-        <button class="text-button" data-random>Random File</button>
+        <button class="text-button" data-random>Random file</button>
       </div>
     </section>
   </div>`;
@@ -175,8 +250,40 @@ function renderHome() {
 
 function startCase(id) {
   const caseDef = CASES.find(item => item.id === id);
-  state = { caseDef, facts: caseDef.facts(), docIndex: 0, typed: "", attempts: 0, correctAttempts: 0, startedAt: Date.now(), checkResults: [], activeCheck: null, checkAnswered: false };
+  const saved = progressFor(id);
+  if (saved) {
+    renderResumeChoice(caseDef, saved);
+    return;
+  }
+  state = { caseDef, facts: caseDef.facts(), docIndex: 0, typed: "", docAttempts: 0, docCorrect: 0, sessionAttempts: 0, sessionCorrect: 0, sessionCharacters: 0, sessionStartedAt: 0, checkResults: [], activeCheck: null, checkAnswered: false };
   renderDocument();
+}
+
+function renderResumeChoice(caseDef, saved) {
+  stopTimers();
+  const documentTitle = caseDef.documents[saved.docIndex][1];
+  app.innerHTML = `<div class="shell">${masthead(caseDef.title)}
+    <section class="resume-choice">
+      <p class="section-label">Saved locally</p>
+      <h1>${caseDef.title}</h1>
+      <p class="resume-detail">Document ${saved.docIndex + 1} of ${caseDef.documents.length}<br>${documentTitle}</p>
+      <div class="complete-actions">
+        <button class="primary-button" data-resume>Continue where you left off</button>
+        <button class="secondary-button" data-restart>Start this document again</button>
+      </div>
+    </section>
+  </div>`;
+  bindCommon();
+  document.querySelector("[data-resume]").addEventListener("click", () => {
+    state = { caseDef, facts: saved.facts, docIndex: saved.docIndex, typed: saved.typed || "", docAttempts: saved.docAttempts || 0, docCorrect: saved.docCorrect || 0, sessionAttempts: 0, sessionCorrect: 0, sessionCharacters: 0, sessionStartedAt: 0, checkResults: saved.checkResults || [], activeCheck: null, checkAnswered: false };
+    renderDocument();
+  });
+  document.querySelector("[data-restart]").addEventListener("click", () => {
+    state = { caseDef, facts: saved.facts, docIndex: saved.docIndex, typed: "", docAttempts: 0, docCorrect: 0, sessionAttempts: 0, sessionCorrect: 0, sessionCharacters: 0, sessionStartedAt: 0, checkResults: saved.checkResults || [], activeCheck: null, checkAnswered: false };
+    clearProgress(caseDef.id);
+    saveProgress();
+    renderDocument();
+  });
 }
 
 function currentDocument() {
@@ -196,21 +303,25 @@ function renderIndex() {
 }
 
 function renderDocument() {
+  stopTimers();
+  resetSession();
   const doc = currentDocument();
-  const accuracy = state.attempts ? Math.round((state.correctAttempts / state.attempts) * 100) : 100;
   app.innerHTML = `<div class="shell">${masthead(`Document ${state.docIndex + 1} / ${state.caseDef.documents.length}`)}
     <div class="play-layout">
       ${renderIndex()}
       <article class="document">
         <header class="document-header">
-          <div><p class="matter-name">${state.caseDef.title}</p><h1 class="document-title">${doc.title}</h1></div>
-          <span class="accuracy">Accuracy ${accuracy}%</span>
+          <div><h1 class="matter-name">${state.caseDef.title}</h1><p class="document-meta">${doc.phase} / ${doc.title}</p></div>
         </header>
         <div class="typing-wrap">
           <p class="typing-text" aria-hidden="true"></p>
           <textarea class="capture" inputmode="text" enterkeyhint="done" rows="1" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Type the displayed document"></textarea>
         </div>
-        <footer class="document-footer"><span class="keyboard-note">Type to begin. Backspace to correct.</span><span data-continue-slot></span></footer>
+        <footer class="document-footer">
+          <div><p class="live-stats" aria-live="polite"><span data-accuracy>Session accuracy 100.0%</span><span data-characters>0 characters</span><span data-time>0:00</span></p><p class="keyboard-note" data-note>Type to begin. Backspace to correct.</p></div>
+          <button class="secondary-button" data-end disabled>End session</button>
+        </footer>
+        <div data-complete-slot></div>
       </article>
     </div>
   </div>`;
@@ -223,25 +334,48 @@ function bindTyping(target) {
   const capture = document.querySelector(".capture");
   const text = document.querySelector(".typing-text");
   const note = document.querySelector(".keyboard-note");
-  const continueSlot = document.querySelector("[data-continue-slot]");
+  const completeSlot = document.querySelector("[data-complete-slot]");
+  const endButton = document.querySelector("[data-end]");
   const usesTouch = navigator.maxTouchPoints > 0 || matchMedia("(pointer: coarse)").matches;
+  const boundaries = paragraphBoundaries(target);
+
+  function updateStats() {
+    const accuracyNode = document.querySelector("[data-accuracy]");
+    const characterNode = document.querySelector("[data-characters]");
+    const timeNode = document.querySelector("[data-time]");
+    if (!accuracyNode) return;
+    accuracyNode.textContent = `Session accuracy ${accuracy(state.sessionCorrect, state.sessionAttempts)}%`;
+    characterNode.textContent = `${state.sessionCharacters} ${state.sessionCharacters === 1 ? "character" : "characters"}`;
+    timeNode.textContent = formatTime(elapsedSeconds());
+  }
 
   function draw() {
     text.innerHTML = Array.from(target).map((char, index) => {
       let className = "char";
       if (index < state.typed.length) className += state.typed[index] === char ? " typed" : " wrong";
       if (index === state.typed.length) className += " cursor";
-      return `<span class="${className}">${escapeHtml(char)}</span>`;
+      const paragraphBreak = boundaries.includes(index) ? `<span class="paragraph-break" aria-hidden="true"></span>` : "";
+      return `${paragraphBreak}<span class="${className}">${escapeHtml(char)}</span>`;
     }).join("");
-    const accuracy = state.attempts ? Math.round((state.correctAttempts / state.attempts) * 100) : 100;
-    document.querySelector(".accuracy").textContent = `Accuracy ${accuracy}%`;
+    updateStats();
     capture.value = state.typed;
     capture.setSelectionRange(capture.value.length, capture.value.length);
     if (state.typed.length === target.length && state.typed === target) {
+      stopTimers();
+      saveProgress();
+      endButton.remove();
       note.textContent = "Document complete";
-      continueSlot.innerHTML = `<button class="primary-button" data-continue>Continue</button>`;
+      completeSlot.innerHTML = `<section class="document-complete" aria-live="polite"><p class="section-label">Document complete</p><p class="document-score">${accuracy(state.docCorrect, state.docAttempts)}% accuracy</p><button class="primary-button" data-continue>Continue</button></section>`;
       document.querySelector("[data-continue]").addEventListener("click", advance);
     }
+  }
+
+  function showCheckpoint() {
+    note.textContent = `Paragraph complete. Session accuracy ${accuracy(state.sessionCorrect, state.sessionAttempts)}%.`;
+    clearTimeout(checkpointTimer);
+    checkpointTimer = setTimeout(() => {
+      if (document.querySelector("[data-note]") === note) note.textContent = "Keep typing, or end the session at any point.";
+    }, 2400);
   }
 
   function focusCapture() { capture.focus({ preventScroll: true }); }
@@ -256,22 +390,72 @@ function bindTyping(target) {
     const compareLength = Math.min(state.typed.length, next.length);
     while (commonLength < compareLength && state.typed[commonLength] === next[commonLength]) commonLength += 1;
     for (let index = commonLength; index < next.length; index += 1) {
-      state.attempts += 1;
-      if (next[index] === target[index]) state.correctAttempts += 1;
+      if (!state.sessionStartedAt) {
+        state.sessionStartedAt = Date.now();
+        sessionTimer = setInterval(updateStats, 1000);
+      }
+      state.sessionAttempts += 1;
+      state.docAttempts += 1;
+      state.sessionCharacters += 1;
+      if (next[index] === target[index]) {
+        state.sessionCorrect += 1;
+        state.docCorrect += 1;
+      }
     }
     state.typed = next;
+    endButton.disabled = state.sessionAttempts === 0;
+    saveProgress();
     draw();
+    if (boundaries.includes(state.typed.length)) showCheckpoint();
   });
+  endButton.addEventListener("click", renderSessionComplete);
   capture.maxLength = target.length;
-  if (usesTouch) note.textContent = "Tap the text to open your keyboard.";
+  if (state.typed.length) note.textContent = "Continue where you left off.";
+  else if (usesTouch) note.textContent = "Tap the text to open your keyboard.";
   draw();
   if (!usesTouch) requestAnimationFrame(focusCapture);
+}
+
+function paragraphBoundaries(target) {
+  const sentenceEnds = [...target.matchAll(/[.!?](?:[”']?)(?:\s+|$)/g)].map(match => match.index + match[0].length);
+  return sentenceEnds.filter((_, index) => (index + 1) % 2 === 0).filter(index => index < target.length - 40);
+}
+
+function renderSessionComplete() {
+  const sessionResult = {
+    accuracy: accuracy(state.sessionCorrect, state.sessionAttempts),
+    characters: state.sessionCharacters,
+    time: elapsedSeconds()
+  };
+  stopTimers();
+  saveProgress();
+  app.innerHTML = `<div class="shell">${masthead(state.caseDef.title)}
+    <section class="complete session-complete">
+      <p class="section-label">Session complete</p>
+      <h1>${sessionResult.accuracy}% accuracy</h1>
+      <dl class="session-results">
+        <div><dt>Characters typed</dt><dd>${sessionResult.characters}</dd></div>
+        <div><dt>Practice time</dt><dd>${formatTime(sessionResult.time)}</dd></div>
+      </dl>
+      <div class="complete-actions">
+        <button class="primary-button" data-continue-document>Continue this document</button>
+        <button class="secondary-button" data-other>Choose another file</button>
+      </div>
+    </section>
+  </div>`;
+  bindCommon();
+  document.querySelector("[data-continue-document]").addEventListener("click", renderDocument);
+  document.querySelector("[data-other]").addEventListener("click", renderHome);
 }
 
 function advance() {
   const completedIndex = state.docIndex + 1;
   const check = state.caseDef.checks[completedIndex];
   state.typed = "";
+  state.docAttempts = 0;
+  state.docCorrect = 0;
+  resetSession();
+  saveProgress();
   if (check) {
     state.activeCheck = check;
     state.checkAnswered = false;
@@ -284,15 +468,21 @@ function advance() {
 function goNextDocument() {
   state.activeCheck = null;
   state.docIndex += 1;
-  if (state.docIndex >= state.caseDef.documents.length) renderComplete();
-  else renderDocument();
+  if (state.docIndex >= state.caseDef.documents.length) {
+    clearProgress(state.caseDef.id);
+    renderComplete();
+  } else {
+    saveProgress();
+    renderDocument();
+  }
 }
 
 function renderCheck() {
+  stopTimers();
   const check = state.activeCheck;
   app.innerHTML = `<div class="shell">${masthead(state.caseDef.title)}
     <section class="file-check">
-      <p class="section-label">File Check</p>
+      <p class="section-label">File check</p>
       <h1 class="check-prompt">${fill(check.prompt)}</h1>
       <p class="check-context">${fill(check.context)}</p>
       <div class="answers">
@@ -320,19 +510,15 @@ function answerCheck(selected) {
 }
 
 function renderComplete() {
-  const accuracy = state.attempts ? ((state.correctAttempts / state.attempts) * 100).toFixed(1) : "100.0";
-  const minutes = Math.max((Date.now() - state.startedAt) / 60000, 1 / 60);
-  const words = state.caseDef.documents.reduce((sum, doc) => sum + fill(doc[2]).trim().split(/\s+/).length, 0);
-  const wpm = Math.max(1, Math.round(words / minutes));
+  stopTimers();
   const flagged = state.checkResults.filter(Boolean).length;
   app.innerHTML = `<div class="shell">${masthead(state.caseDef.title)}
     <section class="complete">
-      <p class="section-label">File Complete</p>
+      <p class="section-label">Case complete</p>
       <h1>${state.caseDef.title}</h1>
       <dl class="results">
-        <div class="result"><dt>Accuracy</dt><dd>${accuracy}%</dd></div>
+        <div class="result"><dt>Documents typed</dt><dd>${state.caseDef.documents.length}</dd></div>
         <div class="result"><dt>Details flagged</dt><dd>${flagged} / ${state.checkResults.length}</dd></div>
-        <div class="result"><dt>Typing pace</dt><dd>${wpm} WPM</dd></div>
       </dl>
       <div class="complete-actions">
         <button class="primary-button" data-replay>Replay with new facts</button>
@@ -346,7 +532,10 @@ function renderComplete() {
 }
 
 function bindCommon() {
-  document.querySelectorAll("[data-home]").forEach(button => button.addEventListener("click", renderHome));
+  document.querySelectorAll("[data-home]").forEach(button => button.addEventListener("click", () => {
+    if (state.caseDef) saveProgress();
+    renderHome();
+  }));
 }
 
 renderHome();
